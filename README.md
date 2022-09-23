@@ -16,3 +16,7 @@ pip install -r requirements.txt
 ```
 
 ## Usage:
+
+```
+python run.py PATH_TO_DIRECTORY
+```

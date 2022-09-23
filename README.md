@@ -8,5 +8,11 @@ This simple script is to help me to avoid this issue by:
 - Get the media creation time from that.
 - update the file modification time accordingly.
 
+## Requirements:
+
+```
+sudo apt-get install -y exiftool
+pip install -r requirements.txt
+```
 
 ## Usage:

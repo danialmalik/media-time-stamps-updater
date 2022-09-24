@@ -12,7 +12,7 @@ from pillow_heif import register_heif_opener
 # Ref: https://stackoverflow.com/questions/38537905/set-logging-levels
 logging.basicConfig()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR) # Change logging level to DEBUG for more info.
+logger.setLevel(logging.ERROR)  # Change logging level to DEBUG for more info.
 
 
 # for iPhone's .HEIC image files.
@@ -92,9 +92,9 @@ def read_video_creation_date(video_path):
     """
     Ref: https://stackoverflow.com/questions/60576891/how-to-read-exif-data-of-movies-in-python
     """
-    EXIFTOOL_DATE_TAG_VIDEOS = "Create Date"
+    EXIFTOOL_DATE_TAG_VIDEOS = "Creation Date"
 
-    absolute_path = os.path.join( os.getcwd(), video_path )
+    absolute_path = os.path.join(os.getcwd(), video_path )
     process = subprocess.Popen(["exiftool", absolute_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = process.communicate()
     lines = out.decode("utf-8").split("\n")
@@ -103,7 +103,12 @@ def read_video_creation_date(video_path):
         if EXIFTOOL_DATE_TAG_VIDEOS in str(line):
             datetime_str = str(line.split(" : ")[1].strip())
             logger.debug(f"Got creation date: {datetime_str} for video file {video_path}")
-            return datetime.strptime(datetime_str, EXIF_DATE_FORMAT)
+            # TODO: for now, we are only interested in date so removing the timezone
+            # information from the timestamp. But we need to be able to parse this
+            # timezone info as well.
+            datetime_str_wo_tz = datetime_str.split("+")[0]
+            logger.debug(f"Date after stripping the timezone info: {datetime_str_wo_tz}")
+            return datetime.strptime(datetime_str_wo_tz, EXIF_DATE_FORMAT)
 
 
 def update_timestamp(file, timestamp):
@@ -112,9 +117,9 @@ def update_timestamp(file, timestamp):
     new_access_time = stats.st_atime
     new_modified_time = str(timestamp)
     new_modified_time_epoch = timestamp.timestamp()
-    logging.debug(f"Setting access time for file: {file}, to {new_access_time}")
-    logging.debug(f"Setting access time for file: {file}, to {new_modified_time}")
-    os.utime(file, (stats.st_atime, new_modified_time_epoch))
+    logger.debug(f"Setting access time for file: {file}, to {new_access_time}")
+    logger.debug(f"Setting modified time for file: {file}, to {new_modified_time}")
+    os.utime(file, (new_modified_time_epoch, new_modified_time_epoch))
 
 
 if __name__ == "__main__":

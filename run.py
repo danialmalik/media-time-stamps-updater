@@ -14,9 +14,10 @@ from pillow_heif import register_heif_opener
 # Ref: https://stackoverflow.com/questions/38537905/set-logging-levels
 logging.basicConfig()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # Change logging level to DEBUG for more info.
+logger.setLevel(logging.ERROR)  # Change logging level to DEBUG for more info.
 
 LOCAL_TIMEZONE = "Asia/Karachi"
+DEFAULT_TZ_OFFSET = "+0500"
 
 # for iPhone's .HEIC image files.
 register_heif_opener()
@@ -52,7 +53,6 @@ def update_files_stamps(root_dir, files):
         file = os.path.join(root_dir, file)
         logger.debug(f"Checking file {file}...")
         if is_image(file):
-            continue
             logger.debug(f"File {file} is an image.")
             process_image_file(file)
         elif is_video(file):
@@ -100,12 +100,29 @@ def process_heic_image_file(image_file_path):
 
 def process_non_heic_image_file(image_file_path):
     exif_image = ExifImage(open(image_file_path, "rb"))
-    assert exif_image.has_exif
-    offset = exif_image.offset_time.replace(":", "")
-    datetime_str = f"{exif_image.datetime} {offset}"
-    datetime_stamp = datetime.strptime(datetime_str, EXIF_DATE_FORMAT_TZ)
-    datetime_stamp = datetime_stamp.astimezone(pytz.timezone(LOCAL_TIMEZONE))
 
+    if exif_image.has_exif:
+        offset = exif_image.get("offset_time", DEFAULT_TZ_OFFSET).replace(":", "")
+        datetime_str = f"{exif_image.datetime} {offset}"
+        datetime_stamp = datetime.strptime(datetime_str, EXIF_DATE_FORMAT_TZ)
+        datetime_stamp = datetime_stamp.astimezone(pytz.timezone(LOCAL_TIMEZONE))
+        update_timestamp(image_file_path, datetime_stamp)
+        return
+
+    # No exif data, trying other approach.
+    image = Image.open(image_file_path)
+    image.verify()
+
+    try:
+        datetime_str = image._getexif()[36867]
+        datetime_stamp = datetime.strptime(datetime_str, EXIF_DATE_FORMAT)
+        update_timestamp(image_file_path, datetime_stamp)
+        return
+    except (KeyError, IndexError, TypeError):
+        pass
+
+    # Second approach failed, so final attempt. Call the subprocess.
+    datetime_stamp = _run_exiftool_process(image_file_path, "createdate", is_timestamp=True)
     update_timestamp(image_file_path, datetime_stamp)
 
 
@@ -119,31 +136,46 @@ def read_video_creation_date(video_path):
     """
     Ref: https://stackoverflow.com/questions/60576891/how-to-read-exif-data-of-movies-in-python
     """
-    EXIFTOOL_DATE_TAG_VIDEOS = "Creation Date"
+    return _run_exiftool_process(video_path, "creationdate", is_timestamp=True)
 
-    absolute_path = os.path.join(os.getcwd(), video_path )
-    process = subprocess.Popen(["exiftool", absolute_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+def _run_exiftool_process(file_path, required_key, is_timestamp=False):
+    absolute_path = os.path.join(os.getcwd(), file_path)
+    process = subprocess.Popen(
+        ["exiftool", f"-{required_key}", absolute_path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+
     out, err = process.communicate()
+
     lines = out.decode("utf-8").split("\n")
 
-    for line in lines:
-        if EXIFTOOL_DATE_TAG_VIDEOS in str(line):
+    if len(lines) < 1 or err:
+        logger.error("Error while running exif tool for {file_path} with getter {required_key}")
+        logger.error(err)
+        return None
 
-            datetime_str = str(line.split(" : ")[1].strip())
-            logger.debug(f"Got creation date: {datetime_str} for video file {video_path}")
+    required_output = str(lines[0].split(" : ")[1].strip())
+    logger.debug(f"Got {required_key}: {required_output} for video file {video_path}")
 
-            timezone = "0500"
+    if is_timestamp:
+        datetime_str = required_output
+        timezone = "0500"
 
-            # TODO: fix for -ve timezones
-            if "+" in datetime_str:
-                datetime_str_wo_tz, timezone = datetime_str.split("+")
-                timezone = timezone.replace(":", "")
-            else:
-                datetime_str_wo_tz = datetime_str
+        # TODO: fix for -ve timezones
+        if "+" in datetime_str:
+            datetime_str_wo_tz, timezone = datetime_str.split("+")
+            timezone = timezone.replace(":", "")
+        else:
+            datetime_str_wo_tz = datetime_str
 
-            full_datetime_str = f'{datetime_str_wo_tz} +{timezone}'
-            logger.debug(f"Date after formatting the timezone info: {full_datetime_str}")
-            return datetime.strptime(full_datetime_str, EXIF_DATE_FORMAT_TZ)
+        full_datetime_str = f'{datetime_str_wo_tz} +{timezone}'
+        logger.debug(f"Date after formatting the timezone info: {full_datetime_str}")
+        return datetime.strptime(full_datetime_str, EXIF_DATE_FORMAT_TZ)
+
+    else:
+        return required_output
 
 
 def update_timestamp(file, timestamp):

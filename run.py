@@ -101,7 +101,7 @@ def process_heic_image_file(image_file_path):
 def process_non_heic_image_file(image_file_path):
     exif_image = ExifImage(open(image_file_path, "rb"))
 
-    if exif_image.has_exif:
+    if exif_image.has_exif and hasattr(exif_image, "datetime"):
         offset = exif_image.get("offset_time", DEFAULT_TZ_OFFSET).replace(":", "")
         datetime_str = f"{exif_image.datetime} {offset}"
         datetime_stamp = datetime.strptime(datetime_str, EXIF_DATE_FORMAT_TZ)
@@ -123,7 +123,10 @@ def process_non_heic_image_file(image_file_path):
 
     # Second approach failed, so final attempt. Call the subprocess.
     datetime_stamp = _run_exiftool_process(image_file_path, "createdate", is_timestamp=True)
-    update_timestamp(image_file_path, datetime_stamp)
+    if datetime_stamp:
+        update_timestamp(image_file_path, datetime_stamp)
+    else:
+        logger.error("All methods fail to fetch timestamp for file: {}".format(image_file_path))
 
 
 def process_video_file(file):
@@ -136,7 +139,7 @@ def read_video_creation_date(video_path):
     """
     Ref: https://stackoverflow.com/questions/60576891/how-to-read-exif-data-of-movies-in-python
     """
-    return _run_exiftool_process(video_path, "creationdate", is_timestamp=True)
+    return _run_exiftool_process(video_path, "createdate", is_timestamp=True)
 
 
 def _run_exiftool_process(file_path, required_key, is_timestamp=False):
@@ -150,6 +153,7 @@ def _run_exiftool_process(file_path, required_key, is_timestamp=False):
     out, err = process.communicate()
 
     lines = out.decode("utf-8").split("\n")
+    lines = [line for line in lines if line.strip() != ""]
 
     if len(lines) < 1 or err:
         logger.error("Error while running exif tool for {file_path} with getter {required_key}")
@@ -157,7 +161,7 @@ def _run_exiftool_process(file_path, required_key, is_timestamp=False):
         return None
 
     required_output = str(lines[0].split(" : ")[1].strip())
-    logger.debug(f"Got {required_key}: {required_output} for video file {video_path}")
+    logger.debug(lines)
 
     if is_timestamp:
         datetime_str = required_output
